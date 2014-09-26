@@ -26,15 +26,15 @@ module PopUpArchive
 
     def initialize(args)
       #puts args.inspect
-      @un = args[:un]
-      @pw = args[:pw]
-      @oauth_id = args[:id]
-      @oauth_secret = args[:secret]
-      @oauth_redir_uri = args[:redir_uri] || 'urn:ietf:wg:oauth:2.0:oob'
-      @host  = args[:host] || 'https://www.popuparchive.com'
-      @debug = args[:debug]
-      @user_agent = args[:user_agent] || 'popuparchive-ruby-client/'+version()
-      @api_endpoint = args[:api_endpoint] || '/api';
+      @un                  = args[:username]
+      @pw                  = args[:password]
+      @oauth_id            = args[:id]
+      @oauth_secret        = args[:secret]
+      @oauth_redir_uri     = args[:redir_uri] || 'urn:ietf:wg:oauth:2.0:oob'
+      @host                = args[:host] || 'https://www.popuparchive.com'
+      @debug               = args[:debug]
+      @user_agent          = args[:user_agent] || 'popuparchive-ruby-client/'+version()
+      @api_endpoint        = args[:api_endpoint] || '/api';
 
       # sanity check
       begin
