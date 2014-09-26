@@ -3,6 +3,9 @@ $:.unshift File.dirname(__FILE__)+'/../lib'
 require 'popuparchive'
 require 'json'
 require 'pp'
+require 'dotenv'
+
+Dotenv.load
 
 RSpec.configure do |config|
   #config.run_all_when_everything_filtered = true
