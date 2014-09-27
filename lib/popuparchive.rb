@@ -112,19 +112,17 @@ module PopUpArchive
 
     end
 
+    def get_collection(coll_id)
+      resp = get('/collections/'+coll_id)
+      return resp.http_resp.body
+    end
+
   end # end Client
 
   # dependent classes
   class Response
 
-    # most attributes are assigned dynamically in initialize().
-    # Try:
-    #
-    #  puts response.inspect
-    #
-    # to see them.
-
-    attr_accessor :results
+    attr_accessor :http_resp
 
     def initialize(http_resp)
       @http_resp = http_resp
@@ -133,29 +131,9 @@ module PopUpArchive
       #warn "code=" + http_resp.status.to_s
 
       @is_ok = false
-      if (http_resp.status.to_s =~ /^2\d\d/)
+      if http_resp.status.to_s =~ /^2\d\d/
         @is_ok = true
       end
-
-      if (!@is_ok)
-        return
-      end
-
-      #warn "is_ok=#{@is_ok}"
-
-      body = http_resp.body
-
-      #warn body.inspect
-
-      # set body keys as attributes in the object
-      body.each {|k,v|
-
-        # create the attribute
-        self.instance_eval { class << self; self end }.send(:attr_accessor, k)
-
-        # assign the value
-        send("#{k}=",v)
-      }
 
     end
 
@@ -165,6 +143,22 @@ module PopUpArchive
 
     def is_success()
       return @is_ok
+    end
+
+    def method_missing(meth, *args, &block)
+      if @http_resp.body.respond_to? meth
+        @http_resp.body.send meth
+      else
+        super
+      end
+    end
+
+    def respond_to?(meth)
+      if @http_resp.body.respond_to? meth
+        true
+      else
+        super
+      end
     end
 
   end # end Response
