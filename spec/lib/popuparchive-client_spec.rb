@@ -12,7 +12,8 @@ def get_pua_client
   :id => OAUTH_ID,
   :secret => OAUTH_SECRET,
   :host   => (ENV['PUA_HOST'] || 'http://localhost:3000'),
-  :debug  => ENV['PUA_DEBUG']
+  :debug  => ENV['PUA_DEBUG'],
+  :croak_on_404 => true
   )
 end
 

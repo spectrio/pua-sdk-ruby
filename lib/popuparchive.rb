@@ -11,6 +11,29 @@ require 'oauth2'
 require 'uri'
 
 module PopUpArchive
+
+  module Error
+    class NotFound < StandardError
+
+    end
+  end
+
+  class FaradayErrHandler < Faraday::Response::Middleware
+    def on_complete(env)
+      # Ignore any non-error response codes
+      return if (status = env[:status]) < 400
+      #puts "got response status #{status}"
+      case status
+      when 404
+        #raise Error::NotFound
+        # 404 errors not fatal
+      else
+        #puts pp(env)
+        super  # let parent class deal with it
+      end
+    end
+  end
+
   class Client
 
     attr_accessor :host
@@ -34,7 +57,8 @@ module PopUpArchive
       @host                = args[:host] || 'https://www.popuparchive.com'
       @debug               = args[:debug]
       @user_agent          = args[:user_agent] || 'popuparchive-ruby-client/'+version()
-      @api_endpoint        = args[:api_endpoint] || '/api';
+      @api_endpoint        = args[:api_endpoint] || '/api'
+      @croak_on_404        = args[:croak_on_404] || false
 
       # sanity check
       begin
@@ -92,7 +116,12 @@ module PopUpArchive
       #puts pp(@token)
       conn = Faraday.new(opts) do |faraday|
         faraday.request :url_encoded
-        [:mashify, :json, :raise_error].each{|mw| faraday.response(mw) }
+        [:mashify, :json].each{|mw| faraday.response(mw) }
+        if !@croak_on_404
+          faraday.use PopUpArchive::FaradayErrHandler
+        else 
+          faraday.response(:raise_error)
+        end
         faraday.request :authorization, 'Bearer', @token.token
         faraday.response :logger if @debug
         faraday.adapter  :excon   # IMPORTANT this is last
