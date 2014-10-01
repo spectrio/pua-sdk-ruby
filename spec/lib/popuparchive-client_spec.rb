@@ -1,22 +1,5 @@
 require 'spec_helper'
 
-# assumes ID and SECRET set in env vars
-OAUTH_ID     = ENV['PUA_ID']
-OAUTH_SECRET = ENV['PUA_SECRET']
-if !OAUTH_ID or !OAUTH_SECRET
-  abort("Must set PUA_ID and PUA_SECRET env vars -- did you create a .env file?")
-end
-
-def get_pua_client
-  PopUpArchive::Client.new(
-  :id => OAUTH_ID,
-  :secret => OAUTH_SECRET,
-  :host   => (ENV['PUA_HOST'] || 'http://localhost:3000'),
-  :debug  => ENV['PUA_DEBUG'],
-  :croak_on_404 => true
-  )
-end
-
 describe PopUpArchive::Client do
   it "should initialize sanely" do
     client = get_pua_client
@@ -62,10 +45,10 @@ describe "collections" do
     resp = client.get('/collections')
     resp.collections.each do |coll|
       items = client.get("/collections/#{coll.id.to_s}/items")
-      puts pp items.items
+      #puts pp items.items
       items.items.each do |item|
         # request directly
-        puts "fetch item #{item.id.to_s}"
+        #puts "fetch item #{item.id.to_s}"
         item_d = client.get("/items/#{item.id.to_s}")
         if item_d.is_success
           expect(item_d.title).to eq(item.title)

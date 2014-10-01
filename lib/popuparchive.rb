@@ -42,6 +42,7 @@ module PopUpArchive
     attr_accessor :user_agent
     attr_accessor :cookies
     attr_accessor :api_endpoint
+    attr_accessor :croak_on_404
 
     def version
       return "1.0.0"
@@ -136,6 +137,16 @@ module PopUpArchive
       return PopUpArchive::Response.new resp
     end
 
+    def post(path, body, content_type='application/json')
+      uri = @api_endpoint + path
+      resp = @agent.post do|req|
+        req.url uri
+        req.body = body
+        req.headers['Content-Type'] = content_type
+      end
+      return PopUpArchive::Response.new resp
+    end
+
     def get_or_create_item(filename)
 
 
@@ -144,6 +155,128 @@ module PopUpArchive
     def get_collection(coll_id)
       resp = get('/collections/'+coll_id)
       return resp.http_resp.body
+    end
+
+    def get_my_uploads
+      resp = get('/collections')
+      my_uploads = nil
+      resp.collections.each do|coll|
+        if coll.title == 'My Uploads'
+          my_uploads = coll
+        end
+      end
+      return my_uploads
+    end 
+
+    def create_item(coll, attrs)
+      resp = post("/collections/#{coll.id}/items", JSON.generate(attrs))
+      return resp.http_resp.body
+    end
+   
+    def create_audio_file(item, attrs={})
+      file = attrs.has_key?(:file) ? URI::encode(attrs.delete(:file)) : nil
+      uri  = "/items/#{item.id}/audio_files"
+      uri  += "?file=#{file}" if file
+      body = JSON.generate({:audio_file => attrs})
+      resp = post(uri, body)
+      puts "audio_file:"
+      puts pp resp
+      return resp.http_resp.body
+    end 
+
+    def start_upload(item, af_id, fileattrs)
+      
+      # workflow is:
+      # (1) GET upload_to with audio_file.id
+      # (2) using response, GET get_init_signature
+      #  (example: "key"=>"$token/$filename", "mime_type"=>"image/jpeg", "filename"=>"$filename", "filesize"=>"$n", "last_modified"=>"$e", "item_id"=>"$iid", "audio_file_id"=>"$afid"}
+      # (3) using upload_id, GET get_all_signatures
+      #  (example: {"key"=>"$token/$filename", "mime_type"=>"image/jpeg", "num_chunks"=>"1", "upload_id"=>"$upid", "filename"=>"$filename", "filesize"=>"$n", "last_modified"=>"$e", "item_id"=>"$iid", "audio_file_id"=>"$afid"}
+      # (4) foreach chunk, GET chunk_loaded (optional, since only UI needs this, not a SDK)
+      # (5) finally, GET upload_finished (see finish_upload() below)
+
+      # check 'item' for validity
+      if !item.has_key? :token 
+        raise ":token missing on item"
+      end
+      if !item.has_key? :id
+        raise ":id missing on item"
+      end
+
+      # check 'fileattrs' for validity
+      if !fileattrs.has_key? :filename
+        raise ":filename missing on fileattrs"
+      end
+      if !fileattrs.has_key? :lastmod
+        raise ":lastmod missing on fileattrs"
+      end
+      if !fileattrs.has_key? :size
+        raise ":size missing on fileattrs"
+      end
+      if !fileattrs.has_key? :mime_type
+        raise ":mime_type missing on fileattrs"
+      end
+
+      base_uri = "/items/#{item.id}/audio_files/#{af_id}"
+
+      upload_to_uri = "#{base_uri}/upload_to"
+      upload_to = get(upload_to_uri)
+      puts "upload_to:"
+      puts pp upload_to
+
+      sig_key = "#{item[:token]}/#{fileattrs[:filename]}"
+      get_sig_uri = "#{base_uri}/get_init_signature?" + Faraday::FlatParamsEncoder.encode({
+        :key           => sig_key,
+        :mime_type     => fileattrs[:mime_type],
+        :filename      => fileattrs[:filename],
+        :filesize      => fileattrs[:size],
+        :last_modified => fileattrs[:lastmod],
+        :item_id       => item.id,
+        :audio_file_id => af_id,
+      })
+      get_sig = get(get_sig_uri)
+      puts "get_sig:"
+      puts pp get_sig
+
+      # build the authorization key
+      upload_key = upload_to['key']
+      authz_key = "#{upload_to.provider} #{upload_key}:#{get_sig.signature}"
+
+      # special agent for aws
+      aws_opts = { 
+        :url => "https://#{upload_to.bucket}.s3.amazonaws.com/#{upload_key}?uploads",
+        :headers => {
+          'User-Agent' => @user_agent,
+          'Authorization' => authz_key,
+        },
+        :ssl => { :verify => false }   
+      }   
+      aws_agent = Faraday.new(aws_opts) do |faraday|
+        faraday.request :url_encoded
+        [:xml, :raise_error].each{|mw| faraday.response(mw) }
+        faraday.response :logger 
+        faraday.adapter  :excon   # IMPORTANT this is last
+      end
+
+      # post to provider to get the upload_id
+      puts "aws_agent.post"
+      aws_resp = aws_agent.post do |req|
+        req.headers['Content-Type'] = fileattrs[:mime_type]
+        req.headers['Content-Disposition'] = "attachment; filename=" + fileattrs[:filename]
+        # TODO
+        req.headers['x-amz-date'] = get_sig.date
+        # "x-amz-acl": settings.acl,
+      end
+      puts "aws response:"
+      puts pp aws_resp
+       
+      
+    end
+
+    def finish_upload(upload)
+      puts "finish_upload:"
+      puts pp upload
+
     end
 
   end # end Client
@@ -176,7 +309,7 @@ module PopUpArchive
 
     def method_missing(meth, *args, &block)
       if @http_resp.body.respond_to? meth
-        @http_resp.body.send meth
+        @http_resp.body.send(meth, *args, &block)
       else
         super
       end

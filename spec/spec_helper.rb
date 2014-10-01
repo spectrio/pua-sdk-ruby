@@ -18,3 +18,20 @@ RSpec.configure do |config|
   #     --seed 1234
   config.order = 'random'
 end
+
+# assumes ID and SECRET set in env vars
+OAUTH_ID     = ENV['PUA_ID']
+OAUTH_SECRET = ENV['PUA_SECRET']
+if !OAUTH_ID or !OAUTH_SECRET
+  abort("Must set PUA_ID and PUA_SECRET env vars -- did you create a .env file?")
+end
+
+def get_pua_client
+  PopUpArchive::Client.new(
+  :id => OAUTH_ID,
+  :secret => OAUTH_SECRET,
+  :host   => (ENV['PUA_HOST'] || 'http://localhost:3000'),
+  :debug  => ENV['PUA_DEBUG'],
+  #:croak_on_404 => true
+  )
+end
