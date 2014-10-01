@@ -9,6 +9,7 @@ require 'json'
 require 'faraday_middleware'
 require 'oauth2'
 require 'uri'
+require 'xmlsimple'
 
 module PopUpArchive
 
@@ -220,12 +221,12 @@ module PopUpArchive
       base_uri = "/items/#{item.id}/audio_files/#{af_id}"
 
       upload_to_uri = "#{base_uri}/upload_to"
-      upload_to = get(upload_to_uri)
-      puts "upload_to:"
-      puts pp upload_to
+      upload_to_resp = get(upload_to_uri)
+      puts "upload_to_resp:"
+      puts pp upload_to_resp
 
       sig_key = "#{item[:token]}/#{fileattrs[:filename]}"
-      get_sig_uri = "#{base_uri}/get_init_signature?" + Faraday::FlatParamsEncoder.encode({
+      sig_params = { 
         :key           => sig_key,
         :mime_type     => fileattrs[:mime_type],
         :filename      => fileattrs[:filename],
@@ -233,26 +234,28 @@ module PopUpArchive
         :last_modified => fileattrs[:lastmod],
         :item_id       => item.id,
         :audio_file_id => af_id,
-      })
-      get_sig = get(get_sig_uri)
-      puts "get_sig:"
-      puts pp get_sig
+      }
+      init_sig_uri = "#{base_uri}/get_init_signature?" + Faraday::FlatParamsEncoder.encode(sig_params)
+      init_sig_resp = get(init_sig_uri)
+      puts "init_sig_resp:"
+      puts pp init_sig_resp
 
       # build the authorization key
-      upload_key = upload_to['key']
-      authz_key = "#{upload_to.provider} #{upload_key}:#{get_sig.signature}"
+      upload_key = upload_to_resp['key']
+      authz_key = "#{upload_to_resp.provider} #{upload_key}:#{init_sig_resp.signature}"
 
       # special agent for aws
+      aws_url = "https://#{upload_to_resp.bucket}.s3.amazonaws.com/#{sig_key}"
       aws_opts = { 
-        :url => "https://#{upload_to.bucket}.s3.amazonaws.com/#{sig_key}?uploads",
         :headers => {
           'User-Agent' => @user_agent,
           'Authorization' => authz_key,
+          'x-amz-date' => init_sig_resp.date,
         },
         :ssl => { :verify => false }   
       }   
       aws_agent = Faraday.new(aws_opts) do |faraday|
-        [:xml, :raise_error].each{|mw| faraday.response(mw) }
+        [:mashify, :xml, :raise_error].each{|mw| faraday.response(mw) }
         faraday.response :logger if @debug
         faraday.adapter  :excon   # IMPORTANT this is last
       end
@@ -260,15 +263,33 @@ module PopUpArchive
       # post to provider to get the upload_id
       puts "aws_agent.post"
       aws_resp = aws_agent.post do |req|
+        req.url "#{aws_url}?uploads"
         req.headers['Content-Type'] = fileattrs[:mime_type]
         req.headers['Content-Disposition'] = "attachment; filename=" + fileattrs[:filename]
-        # TODO
-        req.headers['x-amz-date'] = get_sig.date
-        req.headers['x-amz-acl']  = 'public-read'
+        req.headers['x-amz-acl']  = 'public-read'  # TODO
       end
       puts "aws response:"
       puts pp aws_resp
-       
+
+      # pull out the AWS uploadId
+      sig_params[:upload_id] = aws_resp.body.InitiateMultipartUploadResult.UploadId
+
+      # how many chunks do we expect?
+      sig_params[:num_chunks] = fileattrs.has_key?(:num_chunks) ? fileattrs[:num_chunks] : 1
+     
+      all_sig_resp = get("#{base_uri}/get_all_signatures?" + Faraday::FlatParamsEncoder.encode(sig_params))
+      puts "all_sig_resp"
+      puts pp all_sig_resp
+
+      return { 
+        :signatures => all_sig_resp.http_resp.body,
+        :params     => sig_params, 
+        :fileattrs  => fileattrs,
+        :upload_to  => upload_to_resp.http_resp.body,
+        :init_sig   => init_sig_resp.http_resp.body,
+        :aws_url    => aws_url,
+        :aws_agent  => aws_agent,
+      } 
       
     end
 
@@ -276,6 +297,48 @@ module PopUpArchive
       puts "finish_upload:"
       puts pp upload
 
+      # workflow assumes file has been successfully PUT to AWS
+      # (1) GET aws_url?uploadId=$uploadId
+      # parse xml response for ListPartsResult
+      # (2) POST aws_url?uplaodId=$uploadId with body
+      #  <CompleteMultipartUpload>
+      #   <Part><PartNumber>1</PartNumber><ETag>"$etag_from_ListPartsResult"</ETag></Part>
+      #  </CompleteMultipartUpload>
+      # response to POST contains CompleteMultipartUploadResult with final location
+      # (3) GET pua_url/upload_finished/? with params:
+      #  filename => $filename,
+      #  filesize => $n,
+      #  key      => $sig_key,
+      #  last_modified => $e,
+      #  upload_id => $aws_uploadId,
+
+      # sanity check upload object
+      [:signatures, :params, :fileattrs, :upload_to, :init_sig, :aws_url, :aws_agent].each do|p|
+        if !upload.has_key? p
+          raise ":#{p} missing from upload"
+        end
+      end
+
+      aws_upload_id = upload[:params][:upload_id]
+      aws_agent = upload[:aws_agent]
+      parts_resp = aws_agent.get(upload[:aws_url], {:uploadId => aws_upload_id})
+
+      aws_parts = []
+      parts_resp.ListPartsResult.Part.each do|part|
+        aws_parts.push( { PartNumber: part.PartNumber, ETag: part.ETag })
+      end
+      aws_parts_xml = XmlSimple.xml_out({Part: aws_parts}, {rootname: 'CompleteMultipartUpload', noattr: true})
+      puts "aws_parts_xml: #{aws_parts_xml}"
+      aws_finish_resp = aws_agent.post do|req|
+        req.url "#{upload[:aws_url]}?uploadId=#{aws_upload_id}"
+        req.headers['Content-Type'] = upload[:fileattrs][:mime_type]
+        req.headers['Content-Disposition'] = "attachment; filename=" + upload[:fileattrs][:filename]
+        req.body = aws_parts_xml
+      end
+
+      puts "aws_finish_resp:"
+      puts pp aws_finish_resp
+      
     end
 
   end # end Client
