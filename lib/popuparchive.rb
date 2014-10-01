@@ -244,7 +244,7 @@ module PopUpArchive
 
       # special agent for aws
       aws_opts = { 
-        :url => "https://#{upload_to.bucket}.s3.amazonaws.com/#{upload_key}?uploads",
+        :url => "https://#{upload_to.bucket}.s3.amazonaws.com/#{sig_key}?uploads",
         :headers => {
           'User-Agent' => @user_agent,
           'Authorization' => authz_key,
@@ -252,9 +252,8 @@ module PopUpArchive
         :ssl => { :verify => false }   
       }   
       aws_agent = Faraday.new(aws_opts) do |faraday|
-        faraday.request :url_encoded
         [:xml, :raise_error].each{|mw| faraday.response(mw) }
-        faraday.response :logger 
+        faraday.response :logger if @debug
         faraday.adapter  :excon   # IMPORTANT this is last
       end
 
@@ -265,7 +264,7 @@ module PopUpArchive
         req.headers['Content-Disposition'] = "attachment; filename=" + fileattrs[:filename]
         # TODO
         req.headers['x-amz-date'] = get_sig.date
-        # "x-amz-acl": settings.acl,
+        req.headers['x-amz-acl']  = 'public-read'
       end
       puts "aws response:"
       puts pp aws_resp
