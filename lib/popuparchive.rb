@@ -62,6 +62,9 @@ module PopUpArchive
       @api_endpoint        = args[:api_endpoint] || '/api'
       @croak_on_404        = args[:croak_on_404] || false
 
+      # normalize host
+      @host.gsub!(/\/$/, '')
+
       # sanity check
       begin
         uri = URI.parse(@host)
@@ -154,7 +157,17 @@ module PopUpArchive
     end
 
     def get_collection(coll_id)
-      resp = get('/collections/'+coll_id)
+      resp = get('/collections/'+coll_id.to_s)
+      return resp.http_resp.body
+    end
+
+    def get_items(coll_id)
+      resp = get('/collections/'+coll_id.to_s+'/items')
+      return resp.http_resp.body.items
+    end
+
+    def get_item(coll_id, item_id)
+      resp = get('/collections/'+coll_id.to_s+'/items/'+item_id.to_s)
       return resp.http_resp.body
     end
 

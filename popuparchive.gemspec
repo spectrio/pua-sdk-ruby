@@ -4,7 +4,7 @@ Gem::Specification.new do |s|
   s.date        = '2014-09-25'
   s.rubyforge_project = "nowarning"
   s.summary     = "Ruby client for the Pop Up Archive API"
-  s.description = "Ruby client for the Pop Up Archive API. See http://popuparchive.com/"
+  s.description = "Ruby client for the Pop Up Archive API. See https://www.popuparchive.com/"
   s.authors     = ["Peter Karman"]
   s.email       = 'peter@popuparchive.com'
   s.homepage    = 'https://github.com/popuparchive/pua-sdk-ruby'
