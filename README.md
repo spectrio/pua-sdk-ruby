@@ -18,8 +18,8 @@ pua_client = PopUpArchive::Client.new(
   :debug  => false
 )
 
-# fetch a collection
-resp = pua_client.get('/collection/1234')
+# fetch a collection with id 1234
+resp = pua_client.get('/collections/1234')
 
 # or idiomatically
 collection = pua_client.get_collection('1234')
