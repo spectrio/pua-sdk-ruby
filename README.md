@@ -25,5 +25,28 @@ resp = pua_client.get('/collections/1234')
 collection = pua_client.get_collection('1234')
 items      = pua_client.get_items(1234)  # all items for collection
 
-# specific item (collection_id, item_id)
+# fetch a specific item (collection_id, item_id)
 item = pua_client.get_item(1234, 5678)
+
+# create a new Item
+new_item = pua_client.create_item(collection, {
+  title: 'this is a new Item'
+})
+
+# add an Audio File
+audio_file = pua_client.create_audio_file(new_item, {
+  remote_file_url: 'http://someplace/there/is/a/file.mp3'
+})
+
+```
+
+## Development
+
+To run the Rspec tests, create a **.env** file in the checkout
+with the following environment variables set to meaningful values:
+
+```
+PUA_ID=somestring
+PUA_SECRET=sekritstring
+PUA_HOST=http://pop-up-archive.dev
+```

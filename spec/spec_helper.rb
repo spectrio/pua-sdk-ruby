@@ -30,7 +30,8 @@ def get_pua_client
   PopUpArchive::Client.new(
   :id => OAUTH_ID,
   :secret => OAUTH_SECRET,
-  :host   => (ENV['PUA_HOST'] || 'http://localhost:3000'),
+  # must duplicate env var because we modify it with gsub
+  :host   => (ENV['PUA_HOST'] || 'http://localhost:3000').dup.to_s,
   :debug  => ENV['PUA_DEBUG'],
   #:croak_on_404 => true
   )

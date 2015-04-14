@@ -193,8 +193,8 @@ module PopUpArchive
       uri  += "?file=#{file}" if file
       body = JSON.generate({:audio_file => attrs})
       resp = post(uri, body)
-      puts "audio_file:"
-      puts pp resp
+      #puts "audio_file:"
+      #puts pp resp
       return resp.http_resp.body
     end 
 
