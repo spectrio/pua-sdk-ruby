@@ -20,20 +20,25 @@ describe "should add Item to Collection" do
     #puts pp( resp )
     # use the first collection, whatever it is.
     coll = resp.collections.first
-    pp coll
+    #pp coll
     item = client.create_item(coll, {
-      title: 'this is an item with remote audio files'
+      title: 'this is an item with remote audio files',
+      extra: {
+        callback: 'https://nosuchdomain.foo/callback/path'
+      }
     })
-    pp item
+    #pp item
     remote_audio = 'https://speechmatics.com/api-samples/zero'
     audio_file = client.create_audio_file(item, {
       remote_file_url: remote_audio
     })
-    pp audio_file
+    #pp audio_file
 
     # now test that the item+audio exists
     pua_item = client.get_item(coll.id, item.id)
+    #pp pua_item
     expect(pua_item.title).to eq item.title
+    expect(pua_item.extra['callback']).to eq item.extra['callback']
     expect(pua_item.audio_files.first.original).to eq remote_audio
 
   end
