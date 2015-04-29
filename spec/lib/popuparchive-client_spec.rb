@@ -26,7 +26,6 @@ describe "collections" do
     #puts pp( resp )
     expect(resp.collections).not_to be_empty
     expect(resp.collections.size).to eq(resp.collections.size)
-    expect(resp.collections[0].title).to eq('My Uploads') # TODO always true?
     expect(resp.collections[0].storage).to be_truthy
 
     # specific collection
