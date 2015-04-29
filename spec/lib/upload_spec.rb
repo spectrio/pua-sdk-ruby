@@ -1,10 +1,6 @@
 require 'spec_helper'
 require 'mime/types'
 
-if !ENV['S3_UPLOAD_FILE']
-  #abort("must set S3_UPLOAD_FILE to test upload feature")
-end
-
 describe "mule upload mocker" do
 
   before :each do
