@@ -85,7 +85,7 @@ module PopUpArchive
         authorize_url:   @host + '/oauth/authorize',
         token_url:       @host + '/oauth/token',
         redirect_uri:    @oauth_redir_uri,
-        #connection_opts: connection_options(options)
+        connection_opts: options.merge( { :ssl => {:verify => false}, } )
       }
 
       # TODO
@@ -110,6 +110,7 @@ module PopUpArchive
       uri = @host + @api_endpoint
       opts = {
         :url => uri,
+        :ssl => {:verify => false},
         :headers => {
           'User-Agent'   => @user_agent,
           'Accept'       => 'application/json',
