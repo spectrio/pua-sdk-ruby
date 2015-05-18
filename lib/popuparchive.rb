@@ -162,11 +162,6 @@ module PopUpArchive
       return resp.http_resp.body
     end
 
-    def get_items(coll_id)
-      resp = get('/collections/'+coll_id.to_s+'/items')
-      return resp.http_resp.body.items
-    end
-
     def get_item(coll_id, item_id)
       resp = get('/collections/'+coll_id.to_s+'/items/'+item_id.to_s)
       return resp.http_resp.body
