@@ -32,10 +32,13 @@ new_item = pua_client.create_item(collection, {
   title: 'this is a new Item'
 })
 
-# add an Audio File
+# add an Audio File from remote source
 audio_file = pua_client.create_audio_file(new_item, {
   remote_file_url: 'http://someplace/there/is/a/file.mp3'
 })
+
+# upload a local Audio File
+audio_file = pua_client.upload_audio_file(new_item, 'path/to/file.mp3')
 
 ```
 

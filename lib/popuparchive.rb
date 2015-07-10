@@ -196,7 +196,7 @@ module PopUpArchive
       return resp.http_resp.body
     end
 
-    def upload_audio_file(item, attrs={}, filepath)
+    def upload_audio_file(item, filepath, attrs={})
       af = create_audio_file(item, attrs)
       upload = start_upload(item, af.id, {
         :filename => File.basename(filepath),

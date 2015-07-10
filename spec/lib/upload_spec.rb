@@ -53,7 +53,7 @@ describe "mule upload mocker" do
       title: 'this is a test simple upload item'
     })  
     file = ENV['S3_UPLOAD_FILE']
-    audio_file = client.upload_audio_file(item, {}, file)
+    audio_file = client.upload_audio_file(item, file)
     #STDERR.puts audio_file.inspect
     expect(audio_file.current_status).to be_truthy
     expect(audio_file.original).to be_nil  # we uploaded so no original value
