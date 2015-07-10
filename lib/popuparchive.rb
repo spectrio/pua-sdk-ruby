@@ -10,6 +10,7 @@ require 'faraday_middleware'
 require 'oauth2'
 require 'uri'
 require 'xmlsimple'
+require 'mime/types'
 
 module PopUpArchive
 
@@ -29,7 +30,7 @@ module PopUpArchive
         #raise Error::NotFound
         # 404 errors not fatal
       else
-        #puts pp(env)
+        #pp(env)
         super  # let parent class deal with it
       end
     end
@@ -119,7 +120,7 @@ module PopUpArchive
       }
       @token = get_oauth_token
       #puts "token="
-      #puts pp(@token)
+      #pp(@token)
       conn = Faraday.new(opts) do |faraday|
         faraday.request :url_encoded
         [:mashify, :json].each{|mw| faraday.response(mw) }
@@ -138,7 +139,7 @@ module PopUpArchive
 
     def get(path, params={})
       resp = @agent.get @api_endpoint + path, params
-      @debug and puts pp(resp)
+      @debug and pp(resp)
       return PopUpArchive::Response.new resp
     end
 
@@ -167,16 +168,17 @@ module PopUpArchive
       return resp.http_resp.body
     end
 
-    def get_my_uploads
-      resp = get('/collections')
-      my_uploads = nil
-      resp.collections.each do|coll|
-        if coll.title == 'My Uploads'
-          my_uploads = coll
+    def get_audio_file(item, audio_file_id)
+      item = get_item(item.collection_id, item.id)
+      audio_file = nil
+      item.audio_files.each do |af|
+        if af.id == audio_file_id
+          audio_file = af
+          break
         end
       end
-      return my_uploads
-    end 
+      audio_file
+    end
 
     def create_item(coll, attrs)
       resp = post("/collections/#{coll.id}/items", JSON.generate(attrs))
@@ -192,7 +194,20 @@ module PopUpArchive
       #puts "audio_file:"
       #puts pp resp
       return resp.http_resp.body
-    end 
+    end
+
+    def upload_audio_file(item, attrs={}, filepath)
+      af = create_audio_file(item, attrs)
+      upload = start_upload(item, af.id, {
+        :filename => File.basename(filepath),
+        :size     => File.size(filepath),
+        :lastmod  => File.mtime(filepath).to_i,
+        :mime_type => MIME::Types.type_for(filepath)[0]
+      })
+      upload.put( filepath )
+      finish_upload(upload)
+      get_audio_file(item, af.id) # re-fetch for latest values
+    end
 
     def start_upload(item, af_id, fileattrs)
       
@@ -231,8 +246,8 @@ module PopUpArchive
 
       upload_to_uri = "#{base_uri}/upload_to"
       upload_to_resp = get(upload_to_uri)
-      puts "upload_to_resp:"
-      puts pp upload_to_resp
+      #puts "upload_to_resp:"
+      #pp upload_to_resp
 
       sig_key = "#{item[:token]}/#{fileattrs[:filename]}"
       sig_params = { 
@@ -246,8 +261,8 @@ module PopUpArchive
       }
       init_sig_uri = "#{base_uri}/get_init_signature?" + Faraday::FlatParamsEncoder.encode(sig_params)
       init_sig_resp = get(init_sig_uri)
-      puts "init_sig_resp:"
-      puts pp init_sig_resp
+      #puts "init_sig_resp:"
+      #pp init_sig_resp
 
       # build the authorization key
       upload_key = upload_to_resp['key']
@@ -270,15 +285,15 @@ module PopUpArchive
       end
 
       # post to provider to get the upload_id
-      puts "aws_agent.post"
+      #puts "aws_agent.post"
       aws_resp = aws_agent.post do |req|
         req.url "#{aws_url}?uploads"
         req.headers['Content-Type'] = fileattrs[:mime_type]
         req.headers['Content-Disposition'] = "attachment; filename=" + fileattrs[:filename]
         req.headers['x-amz-acl']  = 'public-read'  # TODO
       end
-      puts "aws response:"
-      puts pp aws_resp
+      #puts "aws response:"
+      #pp aws_resp
 
       # pull out the AWS uploadId
       sig_params[:upload_id] = aws_resp.body.InitiateMultipartUploadResult.UploadId
@@ -287,10 +302,10 @@ module PopUpArchive
       sig_params[:num_chunks] = fileattrs.has_key?(:num_chunks) ? fileattrs[:num_chunks] : 1
      
       all_sig_resp = get("#{base_uri}/get_all_signatures?" + Faraday::FlatParamsEncoder.encode(sig_params))
-      puts "all_sig_resp"
-      puts pp all_sig_resp
+      #puts "all_sig_resp"
+      #pp all_sig_resp
 
-      return { 
+      return PopUpArchive::Upload.new( 
         :signatures => all_sig_resp.http_resp.body,
         :params     => sig_params, 
         :fileattrs  => fileattrs,
@@ -298,59 +313,144 @@ module PopUpArchive
         :init_sig   => init_sig_resp.http_resp.body,
         :aws_url    => aws_url,
         :aws_agent  => aws_agent,
-      } 
+        :pua_client => self,
+      )
       
     end
 
     def finish_upload(upload)
-      puts "finish_upload:"
-      puts pp upload
+      #puts "finish_upload:"
+      #pp upload
 
       # workflow assumes file has been successfully PUT to AWS
+
+      # sanity check upload object
+      if !upload.is_a?(PopUpArchive::Upload)
+        raise "Upload object not a PopUpArchive::Upload instance"
+      end
+
+
       # (1) GET aws_url?uploadId=$uploadId
       # parse xml response for ListPartsResult
+
+      aws_upload_id = upload.params[:upload_id]
+      aws_agent = upload.aws_agent
+      list_authz_str = "#{upload.upload_to['provider']} #{upload.upload_to['key']}:#{upload.signatures['list_signature'][0]}"
+      parts_resp = aws_agent.get upload.aws_url, {:uploadId => aws_upload_id} do |req|
+        req.headers['Authorization'] = list_authz_str
+        req.headers['x-amz-date']    = upload.signatures['list_signature'][1]
+      end
+
+      aws_parts = []
+      #pp parts_resp
+      if parts_resp.body.ListPartsResult.Part.is_a?(Array)
+        parts_resp.body.ListPartsResult.Part.each do |part|
+          aws_parts.push( { PartNumber: part.PartNumber, ETag: part.ETag })
+        end
+      else
+        p = parts_resp.body.ListPartsResult.Part
+        aws_parts.push( { PartNumber: p.PartNumber, ETag: p.ETag } )
+      end
+
       # (2) POST aws_url?uplaodId=$uploadId with body
       #  <CompleteMultipartUpload>
       #   <Part><PartNumber>1</PartNumber><ETag>"$etag_from_ListPartsResult"</ETag></Part>
       #  </CompleteMultipartUpload>
       # response to POST contains CompleteMultipartUploadResult with final location
+
+      aws_parts_xml = XmlSimple.xml_out({Part: aws_parts}, {rootname: 'CompleteMultipartUpload', noattr: true})
+      #puts "aws_parts_xml: #{aws_parts_xml}"
+      end_authz_str = "#{upload.upload_to['provider']} #{upload.upload_to['key']}:#{upload.signatures['end_signature'][0]}"
+      aws_finish_resp = aws_agent.post do |req|
+        req.url "#{upload.aws_url}?uploadId=#{aws_upload_id}"
+        req.headers['Authorization'] = end_authz_str
+        req.headers['x-amz-date']    = upload.signatures['end_signature'][1]
+        req.headers['Content-Type'] = upload.fileattrs[:mime_type].to_s
+        req.headers['Content-Disposition'] = "attachment; filename=" + upload.fileattrs[:filename]
+        req.body = aws_parts_xml
+      end
+
+      #puts "aws_finish_resp:"
+      #pp aws_finish_resp
+
       # (3) GET pua_url/upload_finished/? with params:
       #  filename => $filename,
       #  filesize => $n,
       #  key      => $sig_key,
       #  last_modified => $e,
       #  upload_id => $aws_uploadId,
-
-      # sanity check upload object
-      [:signatures, :params, :fileattrs, :upload_to, :init_sig, :aws_url, :aws_agent].each do|p|
-        if !upload.has_key? p
-          raise ":#{p} missing from upload"
-        end
-      end
-
-      aws_upload_id = upload[:params][:upload_id]
-      aws_agent = upload[:aws_agent]
-      parts_resp = aws_agent.get(upload[:aws_url], {:uploadId => aws_upload_id})
-
-      aws_parts = []
-      parts_resp.ListPartsResult.Part.each do|part|
-        aws_parts.push( { PartNumber: part.PartNumber, ETag: part.ETag })
-      end
-      aws_parts_xml = XmlSimple.xml_out({Part: aws_parts}, {rootname: 'CompleteMultipartUpload', noattr: true})
-      puts "aws_parts_xml: #{aws_parts_xml}"
-      aws_finish_resp = aws_agent.post do|req|
-        req.url "#{upload[:aws_url]}?uploadId=#{aws_upload_id}"
-        req.headers['Content-Type'] = upload[:fileattrs][:mime_type]
-        req.headers['Content-Disposition'] = "attachment; filename=" + upload[:fileattrs][:filename]
-        req.body = aws_parts_xml
-      end
-
-      puts "aws_finish_resp:"
-      puts pp aws_finish_resp
-      
+      get( upload.finish_url )
+       
     end
 
   end # end Client
+
+  class Upload
+    attr_accessor :signatures, :params, :fileattrs, :upload_to, :init_sig, :aws_url, :aws_agent, :pua_client
+
+    def initialize args
+      args.each do |k,v|
+        instance_variable_set("@#{k}", v) unless v.nil?
+      end
+    end
+
+    def put(filepath)
+      if !File.exists?(filepath)
+        raise "No such file exists: #{filepath}"
+      end
+
+      if self.params[:num_chunks] == 1
+
+        # easiest. Upload as single file
+        media = Faraday::UploadIO.new(filepath, self.fileattrs[:mime_type])
+        self.put_chunk( media, 1 )
+
+      else
+        # TODO upload in chunks
+
+      end
+
+      self
+
+    end
+
+    def put_chunk(media, chunkN)
+      url = "#{self.aws_url}?partNumber=#{chunkN}&uploadId=#{self.params[:upload_id]}"
+      resp = self.aws_agent.put do|req|
+        req.url url 
+        req.headers['Authorization'] = self.authz_key_for_chunk(chunkN)
+        req.headers['x-amz-date']    = self.authz_date_for_chunk(chunkN)
+        req.headers['Content-Type'] = self.fileattrs[:mime_type].to_s
+        req.headers['Content-Disposition'] = "attachment; filename=" + self.fileattrs[:filename]
+        req.body = media
+      end 
+
+      if !resp.status.to_s.match(/^2/)
+        raise resp # TODO needed?
+      end 
+
+      # tell the PUA server we're done with chunks
+      chunk_url = "/items/#{params[:item_id]}/audio_files/#{params[:audio_file_id]}/chunk_loaded/?key=#{params[:key]}&chunk=#{chunkN}&upload_id=#{params[:upload_id]}&filename=#{params[:filename]}&filesize=#{params[:filesize]}&last_modified=#{params[:last_modified]}"
+      self.pua_client.get(chunk_url)
+    end
+
+    def authz_key_for_chunk(chunkN)
+      #puts "chunk #{chunkN}"
+      #pp self.upload_to
+
+      authz_key = "#{upload_to['provider']} #{upload_to['key']}:#{signatures['chunk_signatures'][chunkN.to_s][0]}"
+      authz_key
+    end
+
+    def authz_date_for_chunk(chunkN)
+      signatures['chunk_signatures'][chunkN.to_s][1]
+    end
+
+    def finish_url
+      "/items/#{params[:item_id]}/audio_files/#{params[:audio_file_id]}/upload_finished?key=#{params[:key]}&upload_id=#{params[:upload_id]}&filename=#{params[:filename]}&filesize=#{params[:filesize]}&last_modified=#{params[:last_modified]}"
+    end
+
+  end
 
   # dependent classes
   class Response

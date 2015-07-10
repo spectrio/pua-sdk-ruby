@@ -7,19 +7,20 @@ describe "mule upload mocker" do
     if !ENV['S3_UPLOAD_FILE']
       skip "set S3_UPLOAD_FILE to test upload feature"
     end
+    if !ENV['UPLOAD_COLLECTION']
+      skip "set UPLOAD_COLLECTION to id value to test upload feature"
+    end
   end
 
-  it "should create item and audio_file" do
+  it "should create item and audio_file (long form)" do
     client = get_pua_client
-    client.debug = true
+    client.debug = ENV['PUA_DEBUG']
     client.croak_on_404 = true
-    coll = client.get_my_uploads
+    coll = client.get_collection(ENV['UPLOAD_COLLECTION'])
 
     item = client.create_item(coll, {
-      title: 'this is a test item'
+      title: 'this is a test upload item'
     })
-    puts "item:"
-    puts pp item
 
     af = client.create_audio_file(item)
 
@@ -34,13 +35,28 @@ describe "mule upload mocker" do
 
     })
 
-    puts pp upload
-
     # upload the file to AWS
-    # TODO part of SDK? or external lib?
+    upload.put( file )
 
     # finish the upload at PUA
-    client.finish_upload(upload)
+    resp = client.finish_upload(upload)
+    expect(resp.num_chunks).to eq resp.chunks_uploaded.strip
+
+  end
+
+  it "should create item and audio_file (simple form)" do
+    client = get_pua_client
+    client.debug = ENV['PUA_DEBUG']
+    client.croak_on_404 = true
+    coll = client.get_collection(ENV['UPLOAD_COLLECTION'])
+    item = client.create_item(coll, {
+      title: 'this is a test simple upload item'
+    })  
+    file = ENV['S3_UPLOAD_FILE']
+    audio_file = client.upload_audio_file(item, {}, file)
+    #STDERR.puts audio_file.inspect
+    expect(audio_file.current_status).to be_truthy
+    expect(audio_file.original).to be_nil  # we uploaded so no original value
   end
 
 end
