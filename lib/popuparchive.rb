@@ -139,7 +139,7 @@ module PopUpArchive
 
     def get(path, params={})
       resp = @agent.get @api_endpoint + path, params
-      @debug and pp(resp)
+      #@debug and pp(resp)
       return PopUpArchive::Response.new resp
     end
 
